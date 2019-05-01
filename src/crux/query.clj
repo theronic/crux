@@ -1125,6 +1125,9 @@
          tuples)
     tuples))
 
+(defn- stats [{:keys [kv] :as db}]
+  (idx/read-meta kv :crux.kv/stats))
+
 (defrecord QueryDatasource [kv query-cache object-store valid-time transact-time]
   ICruxDatasource
   (entity [this eid]
@@ -1153,6 +1156,9 @@
   (historyDescending [this snapshot eid]
     (for [^EntityTx entity-tx (idx/entity-history-seq-descending (kv/new-iterator snapshot) eid valid-time transact-time)]
       (assoc (c/entity-tx->edn entity-tx) :crux.db/doc (db/get-single-object object-store snapshot (.content-hash entity-tx)))))
+
+  (stats [this]
+    (crux.query/stats this))
 
   (validTime [_]
     valid-time)

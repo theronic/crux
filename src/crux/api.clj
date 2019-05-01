@@ -178,6 +178,10 @@
     from and including the valid time of the db while respecting
     transaction time. Includes the documents.")
 
+  (stats
+    [db]
+    "TODO document")
+
   (valid-time [db]
     "returns the valid time of the db.
     If valid time wasn't specified at the moment of the db value retrieval
@@ -210,6 +214,9 @@
 
   (history-descending [this snapshot eid]
     (.historyDescending this snapshot eid))
+
+  (stats [this]
+    (.stats this))
 
   (valid-time
     [this]

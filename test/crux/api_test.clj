@@ -161,7 +161,23 @@
               (t/is (instance? LazySeq result))
               (t/is (not (realized? result)))
               (t/is (empty? result))
-              (t/is (realized? result)))))))))
+              (t/is (realized? result))))))
+
+      (t/testing "statistics"
+        (let [stats (.stats f/*api*)]
+          (t/is (= 1 (:name stats))))
+
+        (t/testing "updated"
+          (let [valid-time (Date.)
+                {:keys [crux.tx/tx-time
+                        crux.tx/tx-id]
+                 :as submitted-tx} (.submitTx f/*api* [[:crux.tx/put :ivan {:crux.db/id :ivan :name "Ivan2"} valid-time]])]
+            (t/is (true? (.hasSubmittedTxUpdatedEntity f/*api* submitted-tx :ivan)))
+            (t/is (= tx-time (.sync f/*api* (Duration/ofMillis 1000))))
+            (t/is (= tx-time (.sync f/*api* nil))))
+
+          (let [stats (.stats f/*api*)]
+            (t/is (= 2 (:name stats)))))))))
 
 (t/deftest test-document-bug-123
   (let [version-1-submitted-tx (.submitTx f/*api* [[:crux.tx/put :ivan {:crux.db/id :ivan :name "Ivan" :version 1}]])]

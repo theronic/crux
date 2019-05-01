@@ -81,6 +81,13 @@ public interface ICruxDatasource {
     public Iterable<Map<Keyword,?>> historyDescending(Closeable snapshot, Object eid);
 
     /**
+     * TODO document
+     *
+     * @return         TODO understand.
+     */
+    public Map<?,?> stats();
+
+    /**
      * The valid time of this db.
      * If valid time wasn't specified at the moment of the db value retrieval
      * then valid time will be time of the latest transaction.

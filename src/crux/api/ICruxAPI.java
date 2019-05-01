@@ -151,4 +151,11 @@ public interface ICruxAPI extends Closeable {
      * @return                 a lazy sequence of the transaction log.
      */
     public Iterable<List<?>> txLog(Closeable txLogContext, Long fromTxId, boolean withDocuments);
+
+     /**
+     * TODO
+     *
+     * @return                 TODO
+     */
+    public Map<?,?> stats();
 }

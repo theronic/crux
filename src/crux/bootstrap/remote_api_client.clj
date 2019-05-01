@@ -175,6 +175,9 @@
   (status [_]
     (api-request-sync url nil {:method :get}))
 
+  (stats [_]
+    (api-request-sync (str url "/stats") nil {:method :get}))
+
   (submitTx [_ tx-ops]
     (api-request-sync (str url "/tx-log") tx-ops))
 
