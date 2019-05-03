@@ -31,10 +31,18 @@
       :crux.tx/put (do (assert (instance? Long a))
                        (assert (map? b))
                        (doseq [[k v] (dissoc b :crux.db/id)
-                               :let [value-type (-> schema k :db/valueType)]]
+                               :let [{:keys [db/valueType input_semantics]} (get schema k)]]
                          (assert (contains? schema k))
-                         (case value-type
-                           :String (assert (string? v))))))))
+                         (case input_semantics
+                           "CardinalityMany"
+                           (case valueType
+                             :String (do (assert (coll? v))
+                                         (doseq [i v]
+                                           (assert (string? i)))))
+
+                           "CardinalityOne"
+                           (case valueType
+                             :String (assert (string? v)))))))))
 
 (defn crux-3df-decorator
   [conn schema]
@@ -56,16 +64,28 @@
                                  (let [new-doc (api/document crux b)
                                        eid (:crux.db/id new-doc)
                                        old-doc (some-> (api/history-descending crux-db snapshot (:crux.db/id new-doc))
-                                                       second :crux.db/doc)]
+                                                       first :crux.db/doc)]
                                    (into
                                      acc
-                                     (for [k (set (concat
-                                                    (keys new-doc)
-                                                    (keys old-doc)))
-                                           :when (not= k :crux.db/id)]
-                                       (if (contains? new-doc k)
-                                         [:db/add eid k (get new-doc k)]
-                                         [:db/retract eid k (get old-doc k)])))))))
+                                     (apply
+                                       concat
+                                       (for [k (set (concat
+                                                      (keys new-doc)
+                                                      (keys old-doc)))
+                                             :when (not= k :crux.db/id)]
+                                         (let [old-val (get old-doc k)
+                                               new-val (get new-doc k)
+                                               old-set (if (coll? old-val) (set old-val) #{old-val})
+                                               new-set (if (coll? new-val) (set new-val) #{new-val})]
+                                           (concat
+                                             (for [new new-set
+                                                   :when new
+                                                   :when (not (old-set new))]
+                                               [:db/add eid k new])
+                                             (for [old old-set
+                                                   :when old
+                                                   :when (not (new-set old))]
+                                               [:db/retract eid k old]))))))))))
               []
               tx-ops)]
         (println "3DF: " new-transaction)
@@ -84,10 +104,7 @@
                                 (index-to-3df conn db @crux-ref tx-ops tx-time tx-id)
                                 (catch Throwable t
                                   (println "ERROR " t))))))]
-      (println "DOES NOT GET HERE??? 1")
       (reset! crux-ref ((crux-3df-decorator conn schema) crux))
-
-      (println "DOES NOT GET HERE??? 2")
       (with-system-fn @crux-ref))))
 
 (def schema
@@ -99,6 +116,11 @@
    :user/email (merge
                  (attribute/of-type :String)
                  (attribute/input-semantics :db.semantics.cardinality/one)
+                 (attribute/tx-time))
+
+   :user/likes (merge
+                 (attribute/of-type :String)
+                 (attribute/input-semantics :db.semantics.cardinality/many)
                  (attribute/tx-time))})
 
 (def conn (df/create-debug-conn! "ws://127.0.0.1:6262"))
@@ -128,6 +150,7 @@
       1
       {:crux.db/id 1
        :user/name "Patrik"
+       :user/likes ["apples" "bananas"]
        :user/email "p@p.com"}]])
 
   (api/submit-tx
@@ -135,6 +158,7 @@
     [[:crux.tx/put
       1
       {:crux.db/id 1
+       :user/likes ["something new" "change this"]
        :user/name "Patrik"}]])
 
 
@@ -148,9 +172,18 @@
              [?patrik :user/name "Patrik"]
              [?patrik :user/email ?email]]))
 
+
+  (exec! conn
+         (df/query
+           db "patrik-likes"
+           '[:find ?likes
+             :where
+             [?patrik :user/name "Patrik"]
+             [?patrik :user/likes ?likes]]))
+
   (df/listen-query!
     conn
-    "patrik-email"
+    "patrik-likes"
     (fn [& message]
       (println "QUERY BACK: " message)))
 
