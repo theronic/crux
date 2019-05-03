@@ -36,12 +36,16 @@
                          (case input_semantics
                            "CardinalityMany"
                            (case valueType
+                             (:Eid :Number) (do (assert (coll? v))
+                                                (doseq [i v]
+                                                  (assert (number? i))))
                              :String (do (assert (coll? v))
                                          (doseq [i v]
                                            (assert (string? i)))))
 
                            "CardinalityOne"
                            (case valueType
+                             (:Eid :Number) (assert (number? v))
                              :String (assert (string? v)))))))))
 
 (defn crux-3df-decorator
@@ -62,9 +66,14 @@
                   :crux.tx/put (do
                                  ;; TODO load whatever the previus document is
                                  (let [new-doc (api/document crux b)
+                                       _ (println "NEW-DOC: " new-doc)
                                        eid (:crux.db/id new-doc)
-                                       old-doc (some-> (api/history-descending crux-db snapshot (:crux.db/id new-doc))
-                                                       first :crux.db/doc)]
+                                       old-doc (some->> (api/history-descending crux-db snapshot (:crux.db/id new-doc))
+                                                        ;; history-descending inconsistently includes the current document
+                                                        ;; sometimes (on first transaction attleast
+                                                        (filter
+                                                          (fn [entry] (not= (:crux.tx/tx-id entry) tx-id)))
+                                                        first :crux.db/doc)]
                                    (into
                                      acc
                                      (apply
@@ -75,16 +84,17 @@
                                              :when (not= k :crux.db/id)]
                                          (let [old-val (get old-doc k)
                                                new-val (get new-doc k)
-                                               old-set (if (coll? old-val) (set old-val) #{old-val})
-                                               new-set (if (coll? new-val) (set new-val) #{new-val})]
+                                               old-set (when old-val (if (coll? old-val) (set old-val) #{old-val}))
+                                               new-set (when new-val (if (coll? new-val) (set new-val) #{new-val}))]
+                                           (println "KEY: " k old-set new-set)
                                            (concat
                                              (for [new new-set
                                                    :when new
-                                                   :when (not (old-set new))]
+                                                   :when (or (nil? old-set) (not (old-set new)))]
                                                [:db/add eid k new])
                                              (for [old old-set
                                                    :when old
-                                                   :when (not (new-set old))]
+                                                   :when (or (nil? new-set) (not (new-set old)))]
                                                [:db/retract eid k old]))))))))))
               []
               tx-ops)]
@@ -118,6 +128,11 @@
                  (attribute/input-semantics :db.semantics.cardinality/one)
                  (attribute/tx-time))
 
+   :user/knows (merge
+                 (attribute/of-type :Eid)
+                 (attribute/input-semantics :db.semantics.cardinality/many)
+                 (attribute/tx-time))
+
    :user/likes (merge
                  (attribute/of-type :String)
                  (attribute/input-semantics :db.semantics.cardinality/many)
@@ -144,6 +159,8 @@
 
   (future-cancel system)
 
+  (exec! conn (df/create-db-inputs db))
+
   (api/submit-tx
     crux
     [[:crux.tx/put
@@ -159,10 +176,22 @@
       1
       {:crux.db/id 1
        :user/likes ["something new" "change this"]
-       :user/name "Patrik"}]])
+       :user/name "Patrik"
+       :user/knows [3]}]])
 
+  (api/submit-tx
+    crux
+    [[:crux.tx/put
+      2
+      {:crux.db/id 2
+       :user/name "lars"
+       :user/knows [3]}]
+     [:crux.tx/put
+      3
+      {:crux.db/id 3
+       :user/name "henrik"
+       :user/knows [4]}]])
 
-  (exec! conn (df/create-db-inputs db))
 
   (exec! conn
          (df/query
@@ -172,7 +201,6 @@
              [?patrik :user/name "Patrik"]
              [?patrik :user/email ?email]]))
 
-
   (exec! conn
          (df/query
            db "patrik-likes"
@@ -181,9 +209,36 @@
              [?patrik :user/name "Patrik"]
              [?patrik :user/likes ?likes]]))
 
+  (exec! conn
+         (df/query
+           db "patrik-knows-1"
+           '[:find ?knows
+             :where
+             [?patrik :user/name "Patrik"]
+             [?patrik :user/knows ?knows]]))
+
+  (exec! conn
+         (df/query
+           db "patrik-knows"
+           '[:find ?user-name
+             :where
+             [?patrik :user/name "Patrik"]
+             (trans-knows ?patrik ?knows)
+             [?knows :user/name ?user-name]]
+           '[[(trans-knows ?user ?knows)
+              [?user :user/knows ?knows]]
+             [(trans-knows ?user ?knows)
+              [?user :user/knows ?knows-between]
+              (trans-knows ?knows-between ?knows)]]))
+
+  (df/listen!
+    conn
+    :key
+    (fn [& data] (println "DATA: " data)))
+
   (df/listen-query!
     conn
-    "patrik-likes"
+    "patrik-knows"
     (fn [& message]
       (println "QUERY BACK: " message)))
 
