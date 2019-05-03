@@ -25,7 +25,16 @@
                    (.putLong this))))))
 
 (defn validate-schema!
-  [crux schema tx-ops])
+  [crux schema tx-ops]
+  (doseq [[tx-op a b] tx-ops]
+    (case tx-op
+      :crux.tx/put (do (assert (instance? Long a))
+                       (assert (map? b))
+                       (doseq [[k v] (dissoc b :crux.db/id)
+                               :let [value-type (-> schema k :db/valueType)]]
+                         (assert (contains? schema k))
+                         (case value-type
+                           :String (assert (string? v))))))))
 
 (defn crux-3df-decorator
   [conn schema]
@@ -53,8 +62,6 @@
           tx-ops)]
     (println "3DF: " new-transaction)
     @(exec! conn (df/transact db new-transaction))))
-
-
 
 (defn crux-3df-system
   [conn db schema bootstrap-fn options with-system-fn]
