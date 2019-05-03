@@ -76,7 +76,8 @@
                                           :crux.tx/event-log-kv-backend]))
 
 (defn start-standalone-system ^ICruxAPI [{:keys [db-dir sync? kv-backend event-log-dir doc-cache-size
-                                                 crux.tx/event-log-kv-backend crux.tx/event-log-sync-interval-ms] :as options
+                                                 crux.tx/event-log-kv-backend crux.tx/event-log-sync-interval-ms
+                                                 crux/hooks] :as options
                                           :or {doc-cache-size (:doc-cache-size b/default-options)}}]
   (s/assert ::standalone-options options)
   (let [started (atom [])]
@@ -100,7 +101,7 @@
                      (tx/->EventTxLog event-log-kv-store)
                      (do (log/warn "Using index KV store as event log, not suitable for production environments.")
                          (tx/->KvTxLog kv-store object-store)))
-            indexer (tx/->KvIndexer kv-store tx-log object-store)
+            indexer (tx/->KvIndexer kv-store tx-log object-store hooks)
             event-log-consumer (when event-log-kv-store
                                  (tx/start-event-log-consumer event-log-kv-store indexer (when-not sync?
                                                                                            event-log-sync-interval-ms)))]

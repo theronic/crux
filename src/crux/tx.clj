@@ -161,7 +161,7 @@
   [doc]
   (= :crux.db/evicted (:crux.db/id doc)))
 
-(defrecord KvIndexer [kv tx-log object-store]
+(defrecord KvIndexer [kv tx-log object-store hooks]
   Closeable
   (close [_])
 
@@ -181,23 +181,27 @@
         (idx/index-doc kv content-hash doc))))
 
   (index-tx [_ tx-ops tx-time tx-id]
-    (with-open [snapshot (kv/new-snapshot kv)]
-      (let [tx-command-results (vec (for [[op :as tx-op] tx-ops]
-                                      ((get tx-op->command op tx-command-unknown)
-                                       object-store snapshot tx-log tx-op tx-time tx-id)))]
-        (log/debug "Indexing tx-id:" tx-id "tx-ops:" (count tx-ops))
-        (if (->> (for [{:keys [pre-commit-fn]} tx-command-results
-                       :when pre-commit-fn]
-                   (pre-commit-fn))
-                 (doall)
-                 (every? true?))
-          (do (->> (map :kvs tx-command-results)
-                   (reduce into (sorted-map-by mem/buffer-comparator))
-                   (kv/store kv))
-              (doseq [{:keys [post-commit-fn]} tx-command-results
-                      :when post-commit-fn]
-                (post-commit-fn)))
-          (log/warn "Transaction aborted:" (pr-str tx-ops) (pr-str tx-time) tx-id)))))
+    (when (with-open [snapshot (kv/new-snapshot kv)]
+            (let [tx-command-results (vec (for [[op :as tx-op] tx-ops]
+                                            ((get tx-op->command op tx-command-unknown)
+                                             object-store snapshot tx-log tx-op tx-time tx-id)))]
+              (log/debug "Indexing tx-id:" tx-id "tx-ops:" (count tx-ops))
+              (if (->> (for [{:keys [pre-commit-fn]} tx-command-results
+                             :when pre-commit-fn]
+                         (pre-commit-fn))
+                       (doall)
+                       (every? true?))
+                (do (->> (map :kvs tx-command-results)
+                         (reduce into (sorted-map-by mem/buffer-comparator))
+                         (kv/store kv))
+                    (doseq [{:keys [post-commit-fn]} tx-command-results
+                            :when post-commit-fn]
+                      (post-commit-fn))
+                    true)
+                (do (log/warn "Transaction aborted:" (pr-str tx-ops) (pr-str tx-time) tx-id)
+                    false))))
+      (when-let [hook (:crux.tx/post-index-hook hooks)]
+        (hook tx-ops tx-time tx-id))))
 
   (docs-exist? [_ content-hashes]
     (with-open [snapshot (kv/new-snapshot kv)]
