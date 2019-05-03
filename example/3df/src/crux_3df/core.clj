@@ -45,23 +45,31 @@
 
 (defn index-to-3df
   [conn db crux tx-ops tx-time tx-id]
-  (let [crux-db (api/db crux)
-        new-transaction
-        (reduce
-          (fn [acc [op-key a b]]
-            (case op-key
-              :crux.tx/put (do
-                             ;; TODO load whatever the previus document is
-                             (let [new-doc (api/document crux b)]
-                               (println "WRITING DOC: " (:crux.db/id new-doc))
-                               (into
-                                 acc
-                                 (for [[k v] (dissoc new-doc :crux.db/id)]
-                                   [:db/add (:crux.db/id new-doc) k v]))))))
-          []
-          tx-ops)]
-    (println "3DF: " new-transaction)
-    @(exec! conn (df/transact db new-transaction))))
+  (let [crux-db (api/db crux)]
+    (with-open [snapshot (api/new-snapshot crux-db)]
+      (let [new-transaction
+            (reduce
+              (fn [acc [op-key a b]]
+                (case op-key
+                  :crux.tx/put (do
+                                 ;; TODO load whatever the previus document is
+                                 (let [new-doc (api/document crux b)
+                                       eid (:crux.db/id new-doc)
+                                       old-doc (some-> (api/history-descending crux-db snapshot (:crux.db/id new-doc))
+                                                       second :crux.db/doc)]
+                                   (into
+                                     acc
+                                     (for [k (set (concat
+                                                    (keys new-doc)
+                                                    (keys old-doc)))
+                                           :when (not= k :crux.db/id)]
+                                       (if (contains? new-doc k)
+                                         [:db/add eid k (get new-doc k)]
+                                         [:db/retract eid k (get old-doc k)])))))))
+              []
+              tx-ops)]
+        (println "3DF: " new-transaction)
+        @(exec! conn (df/transact db new-transaction))))))
 
 (defn crux-3df-system
   [conn db schema bootstrap-fn options with-system-fn]
@@ -121,6 +129,14 @@
       {:crux.db/id 1
        :user/name "Patrik"
        :user/email "p@p.com"}]])
+
+  (api/submit-tx
+    crux
+    [[:crux.tx/put
+      1
+      {:crux.db/id 1
+       :user/name "Patrik"}]])
+
 
   (exec! conn (df/create-db-inputs db))
 
